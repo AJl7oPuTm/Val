@@ -5,6 +5,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 
 # ==================== КОНФИГУРАЦИЯ ====================
 BOT_TOKEN = "8669209199:AAFnRG3FG4q0KpR7T-bk_THhpAhEltz_H7U"
@@ -20,9 +21,23 @@ bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
+# ==================== КНОПКИ ====================
+def get_main_keyboard():
+    """Главная клавиатура с кнопками"""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🔄 Создать обмен")],
+            [KeyboardButton(text="📝 Начать обмен")],
+            [KeyboardButton(text="❌ Отмена")]
+        ],
+        resize_keyboard=True
+    )
+    return keyboard
+
 # ==================== СОСТОЯНИЯ ====================
 class TradeStates(StatesGroup):
     waiting_for_exchange = State()
+    waiting_for_verify_code = State()  # Новое состояние для кода 7263
     waiting_for_price = State()
     waiting_for_confirmation = State()
 
@@ -30,13 +45,14 @@ class TradeStates(StatesGroup):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     """Обработчик команды /start"""
-    await state.set_state(TradeStates.waiting_for_exchange)
+    await state.clear()
     await message.answer(
         "🤖 *Добро пожаловать в Trade Bot!*\n"
-        "📝 Напишите номер обмена:\n\n"
+        "Используйте кнопки для навигации:\n\n"
         "🤖 *Welcome to Trade Bot!*\n"
-        "📝 Enter the exchange number:",
-        parse_mode="Markdown"
+        "Use the buttons to navigate:",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
     )
 
 @dp.message(Command("cancel"))
@@ -46,7 +62,8 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
     if current_state is None:
         await message.answer(
             "❌ Нет активных операций для отмены.\n"
-            "❌ No active operations to cancel."
+            "❌ No active operations to cancel.",
+            reply_markup=get_main_keyboard()
         )
         return
     
@@ -55,54 +72,129 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
         "❌ Операция отменена.\n"
         "Для начала введите /start\n\n"
         "❌ Operation cancelled.\n"
-        "To start, enter /start"
+        "To start, enter /start",
+        reply_markup=get_main_keyboard()
+    )
+
+@dp.message(Command("create_exchange"))
+async def cmd_create_exchange(message: types.Message, state: FSMContext):
+    """Обработчик команды /create_exchange"""
+    await state.clear()
+    await message.answer(
+        "❌ *Вы не прошли верификацию!*\n"
+        "Для верификации напишите: @ValletTrade\n\n"
+        "❌ *You are not verified!*\n"
+        "For verification, contact: @ValletTrade",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
+    )
+
+# ==================== ОБРАБОТКА КНОПОК ====================
+@dp.message(lambda message: message.text == "🔄 Создать обмен")
+async def button_create_exchange(message: types.Message, state: FSMContext):
+    """Кнопка Создать обмен"""
+    await state.clear()
+    await message.answer(
+        "❌ *Вы не прошли верификацию!*\n"
+        "Для верификации напишите: @ValletTrade\n\n"
+        "❌ *You are not verified!*\n"
+        "For verification, contact: @ValletTrade",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
+    )
+
+@dp.message(lambda message: message.text == "📝 Начать обмен")
+async def button_start_exchange(message: types.Message, state: FSMContext):
+    """Кнопка Начать обмен"""
+    await state.set_state(TradeStates.waiting_for_exchange)
+    await message.answer(
+        "📝 Напишите номер обмена:\n\n"
+        "📝 Enter the exchange number:",
+        reply_markup=get_main_keyboard()
+    )
+
+@dp.message(lambda message: message.text == "❌ Отмена")
+async def button_cancel(message: types.Message, state: FSMContext):
+    """Кнопка Отмена"""
+    current_state = await state.get_state()
+    if current_state is None:
+        await message.answer(
+            "❌ Нет активных операций для отмены.",
+            reply_markup=get_main_keyboard()
+        )
+        return
+    
+    await state.clear()
+    await message.answer(
+        "❌ Операция отменена.\n"
+        "❌ Operation cancelled.",
+        reply_markup=get_main_keyboard()
     )
 
 # ==================== ОСНОВНАЯ ЛОГИКА ====================
 @dp.message(TradeStates.waiting_for_exchange)
 async def process_exchange_number(message: types.Message, state: FSMContext):
-    """Обработка номера обмена с задержкой 20 секунд"""
+    """Обработка номера обмена"""
     # Проверяем, что введено число
     if not message.text.isdigit():
         await message.answer(
             "❌ Пожалуйста, введите номер обмена *цифрами*:\n"
             "❌ Please enter the exchange number *in digits*:",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
         )
         return
     
     # Сохраняем номер обмена
     await state.update_data(exchange_number=message.text)
     
-    # Отправляем сообщение о подключении
+    # Просим ввести код подтверждения
+    await state.set_state(TradeStates.waiting_for_verify_code)
     await message.answer(
-        f"✅ *Вы успешно подключились к обмену #{message.text}*\n"
-        f"⏳ Ожидайте 20 секунд...\n\n"
-        f"✅ *You successfully connected to exchange #{message.text}*\n"
-        f"⏳ Please wait 20 seconds...",
-        parse_mode="Markdown"
+        f"🔐 Введите *код подтверждения* для сделки #{message.text}:\n"
+        f"🔐 Enter the *verification code* for exchange #{message.text}:",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
     )
+
+@dp.message(TradeStates.waiting_for_verify_code)
+async def process_verify_code(message: types.Message, state: FSMContext):
+    """Обработка кода подтверждения (7263)"""
+    code = message.text.strip()
     
-    # ⏳ ЗАДЕРЖКА 20 СЕКУНД
-    await asyncio.sleep(20)
-    
-    # Проверяем, не отменили ли операцию
-    current_state = await state.get_state()
-    if current_state != TradeStates.waiting_for_exchange:
+    # Проверяем код
+    if code != "7263":
+        await message.answer(
+            f"❌ *Неверный код!*\n"
+            f"Вы ввели: {code}\n"
+            f"Пожалуйста, введите правильный код для сделки.\n\n"
+            f"❌ *Wrong code!*\n"
+            f"You entered: {code}\n"
+            f"Please enter the correct code for the exchange.",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
+        )
         return
     
-    # Переходим к следующему шагу
+    # Код верный - продолжаем
     await state.set_state(TradeStates.waiting_for_price)
     
+    # Получаем номер обмена
+    data = await state.get_data()
+    exchange_number = data.get('exchange_number')
+    
     await message.answer(
+        f"✅ *Код подтвержден!*\n"
+        f"✅ *Вы успешно подключились к обмену #{exchange_number}*\n\n"
         f"💰 Сколько хотите за подарок? (в долларах)\n"
         f"💰 How much do you want for the gift? (in dollars)",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
     )
 
 @dp.message(TradeStates.waiting_for_price)
 async def process_price(message: types.Message, state: FSMContext):
-    """Обработка суммы с задержкой 60 секунд"""
+    """Обработка суммы"""
     # Проверяем, что введено число
     try:
         price = float(message.text.replace(',', '.'))
@@ -173,7 +265,8 @@ async def process_price(message: types.Message, state: FSMContext):
         f"📋 *Exchange details:*\n"
         f"└ Number: #{exchange_number}\n"
         f"└ Amount: {final_price_str}",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
     )
     
     # Очищаем состояние
@@ -191,23 +284,24 @@ async def handle_all_messages(message: types.Message, state: FSMContext):
         if message.text.isdigit() and len(message.text) >= 3:
             # Если пользователь ввел число - автоматически начинаем
             await state.set_state(TradeStates.waiting_for_exchange)
-            # Перенаправляем на обработчик номера
             await process_exchange_number(message, state)
         else:
             await message.answer(
                 "❓ Я не понимаю эту команду.\n"
-                "Для начала работы введите /start\n"
-                "Для отмены операции введите /cancel\n\n"
+                "Используйте кнопки для навигации:\n\n"
                 "❓ I don't understand this command.\n"
-                "To start, enter /start\n"
-                "To cancel, enter /cancel"
+                "Use the buttons to navigate:",
+                reply_markup=get_main_keyboard()
             )
         return
     
     # Если есть состояние, но сообщение не обработано - игнорируем
     await message.answer(
         "⏳ Пожалуйста, следуйте инструкциям бота.\n"
-        "⏳ Please follow the bot's instructions."
+        "Используйте кнопки для ответа.\n\n"
+        "⏳ Please follow the bot's instructions.\n"
+        "Use the buttons to reply.",
+        reply_markup=get_main_keyboard()
     )
 
 # ==================== ЗАПУСК БОТА ====================
@@ -215,7 +309,7 @@ async def main():
     """Главная функция запуска бота"""
     print("=" * 50)
     print("🤖 TRADE BOT ЗАПУЩЕН!")
-    print("⏳ Задержка после номера: 20 секунд")
+    print("🔐 Код подтверждения: 7263")
     print("⏳ Задержка после суммы: 60 секунд")
     print("💰 Валюта: Доллары ($)")
     print("🌐 Языки: Русский / English")
