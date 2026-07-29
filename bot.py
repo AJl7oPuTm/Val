@@ -28,8 +28,8 @@ exchanges = {}
 
 # ==================== ФУНКЦИИ ====================
 def generate_code():
-    """Генерирует 5-значный код с ведущими нулями"""
-    return f"{random.randint(0, 99999):05d}"
+    """Генерирует 4-значный код с ведущими нулями"""
+    return f"{random.randint(0, 9999):04d}"
 
 # ==================== КНОПКИ ====================
 def get_main_keyboard():
@@ -288,7 +288,7 @@ async def process_password(message: types.Message, state: FSMContext):
         )
         return
     
-    # ✅ ПАРОЛЬ ВЕРНЫЙ - СРАЗУ ОТВЕЧАЕМ
+    # ✅ ПАРОЛЬ ВЕРНЫЙ
     print(f"✅ Пароль верный для сделки {exchange_id}")
     
     exchanges[exchange_id]["buyer"] = message.from_user.id
@@ -337,7 +337,7 @@ async def process_password(message: types.Message, state: FSMContext):
     except Exception as e:
         print(f"❌ Ошибка уведомления создателя: {e}")
     
-    # Очищаем состояние ПОСЛЕ подтверждения
+    # Очищаем состояние
     await state.clear()
     
     # ⏳ ЗАДЕРЖКА 60 СЕКУНД
@@ -441,8 +441,8 @@ async def main():
     """Главная функция запуска бота"""
     print("=" * 50)
     print("🤖 TRADE BOT ЗАПУЩЕН!")
-    print("📋 Номер сделки: 5 цифр")
-    print("🔑 Пароль: 5 цифр")
+    print("📋 Номер сделки: 4 цифры")
+    print("🔑 Пароль: 4 цифры")
     print("🔗 Запрос ссылки на подарок")
     print("⏳ Задержка перед подтверждением: 60 секунд")
     print("=" * 50)
