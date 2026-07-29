@@ -79,7 +79,7 @@ def get_main_keyboard():
             [KeyboardButton(text="🆕 Создать сделку")],
             [KeyboardButton(text="🔗 Подключиться")],
             [KeyboardButton(text="💰 Баланс"), KeyboardButton(text="📊 История")],
-            [KeyboardButton(text="❌ Отмена")]
+            [KeyboardButton(text="❓ Инструкция"), KeyboardButton(text="❌ Отмена")]
         ],
         resize_keyboard=True,
         input_field_placeholder="Выберите действие..."
@@ -92,6 +92,25 @@ def get_cancel_keyboard():
             [KeyboardButton(text="❌ Отмена")]
         ],
         resize_keyboard=True
+    )
+    return keyboard
+
+def get_instruction_keyboard():
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text="📤 Продавец",
+                callback_data="instruction_seller"
+            )],
+            [InlineKeyboardButton(
+                text="🛒 Покупатель",
+                callback_data="instruction_buyer"
+            )],
+            [InlineKeyboardButton(
+                text="❌ Закрыть",
+                callback_data="instruction_close"
+            )]
+        ]
     )
     return keyboard
 
@@ -123,13 +142,8 @@ async def cmd_start(message: types.Message, state: FSMContext):
     await message.answer(
         "✨ *Добро пожаловать в Trade Bot!* ✨\n\n"
         "🤝 Безопасный обмен подарками\n\n"
-        "📌 *Как это работает:*\n"
-        "1️⃣ Продавец создаёт сделку → загружает ссылку + цену\n"
-        "2️⃣ Получает номер и пароль\n"
-        "3️⃣ Покупатель вводит номер и пароль → подключается\n"
-        "4️⃣ Через 1 минуту сделка завершается ✅\n"
-        "5️⃣ Покупатель отправляет подарок @ValletTrade\n"
-        "6️⃣ Продавец получает деньги на баланс 💰\n\n"
+        "📌 Для начала работы используйте кнопки ниже.\n"
+        "❓ Если не знаете что делать — нажмите «Инструкция».\n\n"
         "📱 *Выберите способ взаимодействия:*",
         parse_mode="Markdown",
         reply_markup=web_app_button
@@ -194,6 +208,100 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
         return
     await state.clear()
     await message.answer("✅ Операция отменена.", reply_markup=get_main_keyboard())
+
+@dp.message(Command("instruction"))
+async def cmd_instruction(message: types.Message):
+    await show_instruction(message)
+
+# ==================== ИНСТРУКЦИЯ ====================
+async def show_instruction(message: types.Message):
+    await message.answer(
+        "📖 *Инструкция по использованию Trade Bot*\n\n"
+        "Выберите вашу роль:",
+        parse_mode="Markdown",
+        reply_markup=get_instruction_keyboard()
+    )
+
+@dp.callback_query(lambda c: c.data.startswith("instruction_"))
+async def instruction_callback(callback_query: types.CallbackQuery):
+    action = callback_query.data.split("_")[1]
+    
+    if action == "close":
+        await bot.answer_callback_query(callback_query.id)
+        await bot.delete_message(callback_query.from_user.id, callback_query.message.message_id)
+        return
+    
+    if action == "seller":
+        text = (
+            "📤 *Инструкция для ПРОДАВЦА:*\n\n"
+            "1️⃣ Нажмите кнопку «🆕 Создать сделку»\n"
+            "2️⃣ Отправьте *ссылку на подарок*, который вы продаете\n"
+            "3️⃣ Укажите *цену в долларах* 💰\n"
+            "4️⃣ После создания вы получите *номер* и *пароль* от сделки\n"
+            "5️⃣ Отправьте их покупателю\n\n"
+            "6️⃣ После того как покупатель оплатит:\n"
+            "   📦 *Перекиньте подарок на @ValletTrade*\n"
+            "   ✅ После проверки вы получите деньги на баланс\n\n"
+            "⚠️ *Важно:* Не отправляйте подарок напрямую покупателю!\n"
+            "Только через гаранта @ValletTrade"
+        )
+    elif action == "buyer":
+        text = (
+            "🛒 *Инструкция для ПОКУПАТЕЛЯ:*\n\n"
+            "1️⃣ Нажмите кнопку «🔗 Подключиться»\n"
+            "2️⃣ Введите *номер сделки* и *пароль* от неё\n"
+            "3️⃣ Оплатите товар 💳\n"
+            "   _(деньги НЕ идут напрямую продавцу)_\n\n"
+            "4️⃣ После оплаты ожидайте:\n"
+            "   • Продавец отправит подарок гаранту @ValletTrade\n"
+            "   • Гарант проверит его\n"
+            "   • После проверки вы получите подарок ✅\n\n"
+            "🔒 *Безопасность:* Все сделки проходят через гаранта!\n"
+            "Ваши деньги в безопасности до получения товара."
+        )
+    else:
+        await bot.answer_callback_query(callback_query.id)
+        return
+    
+    await bot.answer_callback_query(callback_query.id)
+    
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text="🔙 Назад к ролям",
+                callback_data="instruction_back"
+            )],
+            [InlineKeyboardButton(
+                text="❌ Закрыть",
+                callback_data="instruction_close"
+            )]
+        ]
+    )
+    
+    await bot.edit_message_text(
+        text,
+        chat_id=callback_query.from_user.id,
+        message_id=callback_query.message.message_id,
+        parse_mode="Markdown",
+        reply_markup=keyboard
+    )
+
+@dp.callback_query(lambda c: c.data == "instruction_back")
+async def instruction_back(callback_query: types.CallbackQuery):
+    await bot.answer_callback_query(callback_query.id)
+    await bot.edit_message_text(
+        "📖 *Инструкция по использованию Trade Bot*\n\n"
+        "Выберите вашу роль:",
+        chat_id=callback_query.from_user.id,
+        message_id=callback_query.message.message_id,
+        parse_mode="Markdown",
+        reply_markup=get_instruction_keyboard()
+    )
+
+# ==================== КНОПКА ИНСТРУКЦИЯ ====================
+@dp.message(lambda message: message.text == "❓ Инструкция")
+async def button_instruction(message: types.Message):
+    await show_instruction(message)
 
 # ==================== СОЗДАНИЕ СДЕЛКИ ====================
 @dp.message(lambda message: message.text == "🆕 Создать сделку")
@@ -270,7 +378,8 @@ async def process_create_price(message: types.Message, state: FSMContext):
         f"🔑 Пароль: `{exchanges[exchange_id]['password']}`\n"
         f"💰 Сумма: {price_str}\n\n"
         f"⏳ Ожидайте покупателя...\n"
-        f"Вы получите уведомление, когда кто-то подключится.",
+        f"Вы получите уведомление, когда кто-то подключится.\n\n"
+        f"📖 Не знаете что дальше? Нажмите «❓ Инструкция»",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
@@ -358,7 +467,8 @@ async def process_password(message: types.Message, state: FSMContext):
         f"🔗 *Ссылка:* {gift_link}\n"
         f"💰 *Сумма:* {price_str}\n\n"
         f"⏳ *Ожидайте 1 минуту...*\n"
-        f"Сделка завершится автоматически.",
+        f"Сделка завершится автоматически.\n\n"
+        f"📖 Не знаете что дальше? Нажмите «❓ Инструкция»",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
@@ -370,7 +480,9 @@ async def process_password(message: types.Message, state: FSMContext):
             creator_id,
             f"🔔 *Кто-то подключился к сделке #{exchange_id}!*\n\n"
             f"💰 *Сумма:* {price_str}\n"
-            f"⏳ Через 1 минуту сделка завершится.",
+            f"⏳ Через 1 минуту сделка завершится.\n"
+            f"📦 Подготовьте подарок!\n\n"
+            f"📖 Инструкция: нажмите «❓ Инструкция»",
             parse_mode="Markdown"
         )
     except:
@@ -394,7 +506,6 @@ async def process_password(message: types.Message, state: FSMContext):
     gift_link = exchanges[exchange_id]["gift_link"]
     price_str = format_price(amount)
     
-    # ✅ НОВАЯ ЛОГИКА: сначала отправка подарка гаранту
     # Сообщение покупателю
     try:
         await bot.send_message(
@@ -403,7 +514,8 @@ async def process_password(message: types.Message, state: FSMContext):
             f"📦 *Отправьте подарок гаранту:* @ValletTrade\n"
             f"🔗 Ссылка на подарок: {gift_link}\n"
             f"💰 Сумма: {price_str}\n\n"
-            f"⏳ После проверки гарантом, продавцу будет зачислена сумма.",
+            f"⏳ После проверки гарантом, продавцу будет зачислена сумма.\n\n"
+            f"📖 Инструкция: нажмите «❓ Инструкция»",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
@@ -418,7 +530,8 @@ async def process_password(message: types.Message, state: FSMContext):
             f"💰 *Покупатель заплатил {price_str}*\n"
             f"📦 Отправьте подарок гаранту: @ValletTrade\n"
             f"🔗 Ссылка на подарок: {gift_link}\n\n"
-            f"⏳ После проверки гарантом, вам зачислят на баланс.",
+            f"⏳ После проверки гарантом, вам зачислят на баланс.\n\n"
+            f"📖 Инструкция: нажмите «❓ Инструкция»",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
@@ -452,7 +565,8 @@ async def handle_all_messages(message: types.Message, state: FSMContext):
     
     if current_state is None:
         await message.answer(
-            "❓ Используйте кнопки ниже 👇",
+            "❓ Используйте кнопки ниже 👇\n"
+            "Если не знаете что делать — нажмите «❓ Инструкция»",
             reply_markup=get_main_keyboard()
         )
     else:
@@ -469,6 +583,7 @@ async def main():
     print("📋 4-значный ID и пароль")
     print("⏳ 60 секунд на сделку")
     print("💰 Система баланса активна")
+    print("❓ Инструкция добавлена")
     print("=" * 50)
     
     try:
