@@ -24,8 +24,12 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 # ==================== ХРАНИЛИЩЕ СДЕЛОК ====================
-# Структура: {exchange_id: {"password": "12345", "creator": user_id, "price": None, "gift_link": None, "buyer": None, "status": "..."}}
 exchanges = {}
+
+# ==================== ФУНКЦИИ ====================
+def generate_code():
+    """Генерирует 5-значный код с ведущими нулями"""
+    return f"{random.randint(0, 99999):05d}"
 
 # ==================== КНОПКИ ====================
 def get_main_keyboard():
@@ -44,11 +48,11 @@ def get_main_keyboard():
 class TradeStates(StatesGroup):
     waiting_for_exchange = State()
     waiting_for_password = State()
-    waiting_for_gift_link = State()      # Новое состояние для ссылки
+    waiting_for_gift_link = State()
     waiting_for_price = State()
     waiting_for_confirmation = State()
-    waiting_for_create_link = State()    # Для создания сделки - ссылка
-    waiting_for_create_price = State()   # Для создания сделки - цена
+    waiting_for_create_link = State()
+    waiting_for_create_price = State()
 
 # ==================== КОМАНДЫ ====================
 @dp.message(Command("start"))
@@ -89,15 +93,15 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
 @dp.message(lambda message: message.text == "🔄 Создать сделку")
 async def button_create_exchange(message: types.Message, state: FSMContext):
     """Создание новой сделки"""
-    # Генерируем случайный 5-значный номер
-    exchange_id = str(random.randint(10000, 99999))
+    # Генерируем 5-значный номер
+    exchange_id = generate_code()
     
     # Проверяем, что такой номер еще не существует
     while exchange_id in exchanges:
-        exchange_id = str(random.randint(10000, 99999))
+        exchange_id = generate_code()
     
-    # Генерируем случайный 5-значный пароль
-    password = str(random.randint(10000, 99999))
+    # Генерируем 5-значный пароль
+    password = generate_code()
     
     # Сохраняем сделку
     exchanges[exchange_id] = {
@@ -437,8 +441,8 @@ async def main():
     """Главная функция запуска бота"""
     print("=" * 50)
     print("🤖 TRADE BOT ЗАПУЩЕН!")
-    print("📋 Рандомный ID: 5 цифр")
-    print("🔑 Рандомный пароль: 5 цифр")
+    print("📋 Рандомный ID: 5 цифр (включая ведущие нули)")
+    print("🔑 Рандомный пароль: 5 цифр (включая ведущие нули)")
     print("🔗 Запрос ссылки на подарок")
     print("⏳ Задержка перед подтверждением: 60 секунд")
     print("💰 Валюта: Доллары ($)")
@@ -455,3 +459,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
