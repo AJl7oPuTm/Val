@@ -466,7 +466,6 @@ async def process_password(message: types.Message, state: FSMContext):
         f"📋 *Сделка #{exchange_id}*\n"
         f"🔗 *Ссылка:* {gift_link}\n"
         f"💰 *Сумма:* {price_str}\n\n"
-        f"⏳ *Ожидайте 1 минуту...*\n"
         f"Сделка завершится автоматически.\n\n"
         f"📖 Не знаете что дальше? Нажмите «❓ Инструкция»",
         parse_mode="Markdown",
